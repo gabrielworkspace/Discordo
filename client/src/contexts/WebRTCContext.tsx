@@ -63,6 +63,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const peersRef = useRef<{ [userId: string]: RTCPeerConnection }>({});
   const remoteStreamsRef = useRef<{ [userId: string]: MediaStream }>({});
+  const screenStreamRef = useRef<MediaStream | null>(null);
 
   const initLocalStream = async () => {
     try {
@@ -120,6 +121,13 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     stream.getTracks().forEach(track => {
       peer.addTrack(track, stream);
     });
+
+    if (screenStreamRef.current) {
+      const videoTrack = screenStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        peer.addTrack(videoTrack, stream);
+      }
+    }
 
     peer.ontrack = (event) => {
       remoteStreamsRef.current[targetUserId] = event.streams[0];
@@ -228,6 +236,17 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
           if (!peer) {
             peer = createPeerConnection(payload.caller, localStream || stream);
           }
+          
+          const offerCollision = payload.offer.type === 'offer' && (peer.signalingState !== 'stable');
+          const isPolite = user.id > payload.caller;
+
+          if (offerCollision) {
+            if (!isPolite) {
+              return; // Ignore offer
+            }
+            await peer.setLocalDescription({ type: 'rollback' } as any);
+          }
+
           await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
@@ -301,6 +320,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     if (screenStream) {
       screenStream.getTracks().forEach(track => track.stop());
       setScreenStream(null);
+      screenStreamRef.current = null;
     }
     
     setParticipants([]);
@@ -327,19 +347,13 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const replaceVideoTrack = async (newTrack: MediaStreamTrack | null) => {
     for (const peer of Object.values(peersRef.current)) {
-      const sender = peer.getSenders().find(s => s.track?.kind === 'video');
+      const transceiver = peer.getTransceivers().find(t => t.receiver.track?.kind === 'video');
       
-      if (sender) {
-        if (newTrack) {
-          try {
-            await sender.replaceTrack(newTrack);
-          } catch (err) {
-            console.error('Error replacing track, falling back to addTrack', err);
-            peer.removeTrack(sender);
-            if (localStream) peer.addTrack(newTrack, localStream);
-          }
-        } else {
-          peer.removeTrack(sender);
+      if (transceiver) {
+        try {
+          await transceiver.sender.replaceTrack(newTrack);
+        } catch (err) {
+          console.error('Failed to replace track', err);
         }
       } else if (newTrack && localStream) {
         peer.addTrack(newTrack, localStream);
@@ -367,6 +381,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     if (isSharingScreen && screenStream) {
       screenStream.getTracks().forEach(track => track.stop());
       setScreenStream(null);
+      screenStreamRef.current = null;
       setIsSharingScreen(false);
       replaceVideoTrack(null);
       
@@ -383,6 +398,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       setScreenStream(stream);
+      screenStreamRef.current = stream;
       setIsSharingScreen(true);
       
       const videoTrack = stream.getVideoTracks()[0];
@@ -397,9 +413,10 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       }
 
       videoTrack.onended = async () => {
-        setIsSharingScreen(false);
-        setScreenStream(null);
         replaceVideoTrack(null);
+        setScreenStream(null);
+        screenStreamRef.current = null;
+        setIsSharingScreen(false);
         if (channelRef.current && user) {
           await channelRef.current.track({
             displayName: user.displayName,
