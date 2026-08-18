@@ -84,6 +84,22 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
+    peer.onnegotiationneeded = async () => {
+      try {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        if (channelRef.current && user) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'offer',
+            payload: { target: targetUserId, caller: user.id, offer }
+          });
+        }
+      } catch (err) {
+        console.error('Error during negotiation', err);
+      }
+    };
+
     peersRef.current[targetUserId] = peer;
     return peer;
   };
@@ -130,8 +146,6 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       })
       .on('presence', { event: 'join' }, async ({ key }) => {
         if (key === user.id) return;
-        // User joined, we don't create offer immediately, we let the NEW user create offers for everyone
-        // Actually, WebRTC standard is: newly joined user sends offers to existing users.
       })
       .on('presence', { event: 'leave' }, ({ key }) => {
         if (peersRef.current[key]) {
@@ -142,53 +156,59 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       .on('broadcast', { event: 'offer' }, async ({ payload }) => {
         if (payload.target !== user.id) return;
         
-        const peer = createPeerConnection(payload.caller, localStream || stream);
-        await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        
-        channel.send({
-          type: 'broadcast',
-          event: 'answer',
-          payload: { target: payload.caller, caller: user.id, answer }
-        });
+        try {
+          let peer = peersRef.current[payload.caller];
+          if (!peer) {
+            peer = createPeerConnection(payload.caller, localStream || stream);
+          }
+          await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          
+          channel.send({
+            type: 'broadcast',
+            event: 'answer',
+            payload: { target: payload.caller, caller: user.id, answer }
+          });
+        } catch (err) {
+          console.error('Error handling offer:', err);
+        }
       })
       .on('broadcast', { event: 'answer' }, async ({ payload }) => {
         if (payload.target !== user.id) return;
         const peer = peersRef.current[payload.caller];
         if (peer) {
-          await peer.setRemoteDescription(new RTCSessionDescription(payload.answer));
+          try {
+            await peer.setRemoteDescription(new RTCSessionDescription(payload.answer));
+          } catch (err) {
+            console.error('Error handling answer:', err);
+          }
         }
       })
       .on('broadcast', { event: 'ice-candidate' }, async ({ payload }) => {
         if (payload.target !== user.id) return;
         const peer = peersRef.current[payload.caller];
         if (peer) {
-          await peer.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          try {
+            await peer.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          } catch (err) {
+            console.error('Error handling ice candidate:', err);
+          }
         }
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          // 1. Announce presence
           await channel.track({
             displayName: user.displayName,
             isMuted: false,
             isSharingScreen: false
           });
 
-          // 2. We just joined. Get current presence state.
           const state = channel.presenceState();
-          // We need to send offers to everyone currently in the room
           for (const key of Object.keys(state)) {
             if (key !== user.id) {
-              const peer = createPeerConnection(key, stream);
-              const offer = await peer.createOffer();
-              await peer.setLocalDescription(offer);
-              channel.send({
-                type: 'broadcast',
-                event: 'offer',
-                payload: { target: key, caller: user.id, offer }
-              });
+              // Creating the peer will automatically trigger onnegotiationneeded and send an offer
+              createPeerConnection(key, stream);
             }
           }
         }
