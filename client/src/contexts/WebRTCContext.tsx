@@ -122,10 +122,12 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       peer.addTrack(track, stream);
     });
 
+    const videoTransceiver = peer.addTransceiver('video', { direction: 'sendrecv', streams: [stream] });
+    
     if (screenStreamRef.current) {
       const videoTrack = screenStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
-        peer.addTrack(videoTrack, stream);
+        videoTransceiver.sender.replaceTrack(videoTrack).catch(console.error);
       }
     }
 
