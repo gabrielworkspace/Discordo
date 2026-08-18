@@ -214,7 +214,6 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     }
     
     setParticipants([]);
-    setRoomId(null);
   };
 
   const toggleMute = async () => {
