@@ -1,4 +1,5 @@
-import { createContext, useEffect, useState, useContext, useRef, ReactNode } from 'react';
+import { createContext, useState, useContext, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { supabase } from '../supabase';
 import { AuthContext } from './AuthContext';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -41,7 +42,6 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [roomId, setRoomId] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const peersRef = useRef<{ [userId: string]: RTCPeerConnection }>({});
@@ -90,7 +90,6 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const joinRoom = async (id: string) => {
     if (!user) return;
-    setRoomId(id);
     const stream = await initLocalStream();
     if (!stream) return;
 
@@ -129,7 +128,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
           });
         });
       })
-      .on('presence', { event: 'join' }, async ({ key, newPresences }) => {
+      .on('presence', { event: 'join' }, async ({ key }) => {
         if (key === user.id) return;
         // User joined, we don't create offer immediately, we let the NEW user create offers for everyone
         // Actually, WebRTC standard is: newly joined user sends offers to existing users.
