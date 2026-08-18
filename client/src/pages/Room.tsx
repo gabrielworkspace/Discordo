@@ -103,7 +103,10 @@ const ParticipantAudio = ({ stream, outputId }: { stream?: MediaStream, outputId
   
   useEffect(() => {
     if (audioRef.current) {
-      if (stream) audioRef.current.srcObject = stream;
+      if (stream && audioRef.current.srcObject !== stream) {
+        audioRef.current.srcObject = stream;
+        audioRef.current.play().catch(console.error);
+      }
       
       const audioEl = audioRef.current as any;
       if (typeof audioEl.setSinkId === 'function') {
@@ -152,6 +155,9 @@ export default function Room() {
     leaveRoom, 
     participants, 
     localStream,
+    screenStream,
+    messages,
+    sendMessage,
     isMuted, 
     isSharingScreen, 
     toggleMute, 
@@ -166,6 +172,12 @@ export default function Room() {
   const [roomName, setRoomName] = useState('Sala de Call');
   const [showSettings, setShowSettings] = useState(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   useEffect(() => {
     if (id) {
@@ -194,7 +206,7 @@ export default function Room() {
   };
 
   const sharedScreenParticipant = participants.find(p => p.isSharingScreen && p.stream?.getVideoTracks().length);
-  const showLocalScreenShare = isSharingScreen && localStream?.getVideoTracks().length;
+  const showLocalScreenShare = isSharingScreen && screenStream?.getVideoTracks().length;
 
   const audioInputs = devices.filter(d => d.kind === 'audioinput');
   const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
@@ -228,9 +240,9 @@ export default function Room() {
       <main style={{ flex: 1, display: 'flex', padding: '24px', gap: '24px', overflow: 'hidden' }}>
         
         {/* Video / Screen Share Area */}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-md)' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
           {showLocalScreenShare ? (
-            <ScreenShareVideo stream={localStream!} />
+            <ScreenShareVideo stream={screenStream!} />
           ) : sharedScreenParticipant ? (
             <ScreenShareVideo stream={sharedScreenParticipant.stream} />
           ) : (
@@ -266,6 +278,35 @@ export default function Room() {
               </div>
             ))}
 
+          </div>
+
+          {/* Chat Section */}
+          <div style={{ marginTop: '16px', flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', minHeight: '200px' }}>
+            <div style={{ padding: '12px', borderBottom: '1px solid var(--color-bg-base)', fontWeight: 'bold' }}>Chat</div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {messages.map(m => (
+                <div key={m.id} style={{ fontSize: '0.875rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                    <strong style={{ color: 'var(--color-primary)' }}>{m.senderName}</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{m.time}</span>
+                  </div>
+                  <div style={{ color: 'white', wordBreak: 'break-word' }}>{m.text}</div>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            <form 
+              onSubmit={e => { e.preventDefault(); sendMessage(chatInput); setChatInput(''); }}
+              style={{ display: 'flex', padding: '8px', borderTop: '1px solid var(--color-bg-base)' }}
+            >
+              <input 
+                type="text" 
+                placeholder="Enviar mensagem..." 
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: 'none', backgroundColor: 'var(--color-bg-base)', color: 'white', fontSize: '0.875rem' }}
+              />
+            </form>
           </div>
         </aside>
       </main>

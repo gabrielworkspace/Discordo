@@ -13,9 +13,19 @@ interface Participant {
   stream?: MediaStream;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderName: string;
+  text: string;
+  time: string;
+}
+
 interface WebRTCContextType {
   participants: Participant[];
   localStream: MediaStream | null;
+  screenStream: MediaStream | null;
+  messages: ChatMessage[];
+  sendMessage: (text: string) => void;
   isMuted: boolean;
   isSharingScreen: boolean;
   audioInputId: string;
@@ -48,6 +58,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const [audioInputId, setAudioInputId] = useState<string>('default');
   const [audioOutputId, setAudioOutputId] = useState<string>('default');
   const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const peersRef = useRef<{ [userId: string]: RTCPeerConnection }>({});
@@ -109,6 +120,10 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     stream.getTracks().forEach(track => {
       peer.addTrack(track, stream);
     });
+
+    if (stream.getVideoTracks().length === 0) {
+      peer.addTransceiver('video', { direction: 'sendrecv', streams: [stream] });
+    }
 
     peer.ontrack = (event) => {
       remoteStreamsRef.current[targetUserId] = event.streams[0];
@@ -252,6 +267,9 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
           }
         }
       })
+      .on('broadcast', { event: 'chat' }, ({ payload }) => {
+        setMessages(prev => [...prev, payload]);
+      })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           await channel.track({
@@ -290,6 +308,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     }
     
     setParticipants([]);
+    setMessages([]);
   };
 
   const toggleMute = async () => {
@@ -310,18 +329,32 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const replaceVideoTrack = (newTrack: MediaStreamTrack | null) => {
-    Object.values(peersRef.current).forEach(peer => {
-      const sender = peer.getSenders().find(s => s.track?.kind === 'video');
-      if (sender) {
-        if (newTrack) {
-          sender.replaceTrack(newTrack);
-        } else {
-          peer.removeTrack(sender);
+  const replaceVideoTrack = async (newTrack: MediaStreamTrack | null) => {
+    for (const peer of Object.values(peersRef.current)) {
+      const videoTransceiver = peer.getTransceivers().find(t => t.receiver.track.kind === 'video');
+      if (videoTransceiver) {
+        try {
+          await videoTransceiver.sender.replaceTrack(newTrack);
+        } catch (err) {
+          console.error('Failed to replace video track', err);
         }
-      } else if (newTrack && localStream) {
-        peer.addTrack(newTrack, localStream);
       }
+    }
+  };
+
+  const sendMessage = (text: string) => {
+    if (!channelRef.current || !user || !text.trim()) return;
+    const msg: ChatMessage = {
+      id: Math.random().toString(),
+      senderName: user.displayName,
+      text: text.trim(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setMessages(prev => [...prev, msg]);
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'chat',
+      payload: msg
     });
   };
 
@@ -378,7 +411,10 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   return (
     <WebRTCContext.Provider value={{
       participants,
-      localStream: isSharingScreen && screenStream ? screenStream : localStream,
+      localStream,
+      screenStream,
+      messages,
+      sendMessage,
       isMuted,
       isSharingScreen,
       audioInputId,
