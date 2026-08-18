@@ -28,6 +28,7 @@ const ScreenShareVideo = ({ stream }: { stream?: MediaStream }) => {
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(err => console.error('Erro ao tocar vídeo:', err));
     }
   }, [stream]);
 
@@ -37,7 +38,8 @@ const ScreenShareVideo = ({ stream }: { stream?: MediaStream }) => {
     <video 
       ref={videoRef} 
       autoPlay 
-      playsInline 
+      playsInline
+      muted
       style={{
         width: '100%',
         maxHeight: '70vh',
