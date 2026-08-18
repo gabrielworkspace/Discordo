@@ -102,10 +102,17 @@ const ParticipantAudio = ({ stream, outputId }: { stream?: MediaStream, outputId
   const audioRef = useRef<HTMLAudioElement>(null);
   
   useEffect(() => {
-    if (audioRef.current) {
-      if (stream && audioRef.current.srcObject !== stream) {
-        audioRef.current.srcObject = stream;
-        audioRef.current.play().catch(console.error);
+    if (audioRef.current && stream) {
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const newTrack = audioTracks[0];
+        const currentStream = audioRef.current.srcObject as MediaStream;
+        const currentTrack = currentStream?.getAudioTracks()[0];
+        
+        if (newTrack !== currentTrack) {
+          audioRef.current.srcObject = new MediaStream([newTrack]);
+          audioRef.current.play().catch(console.error);
+        }
       }
       
       const audioEl = audioRef.current as any;
@@ -123,8 +130,17 @@ const ScreenShareVideo = ({ stream }: { stream?: MediaStream }) => {
   
   useEffect(() => {
     if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.play().catch(err => console.error('Erro ao tocar vídeo:', err));
+      const videoTracks = stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        const newTrack = videoTracks[0];
+        const currentStream = videoRef.current.srcObject as MediaStream;
+        const currentTrack = currentStream?.getVideoTracks()[0];
+        
+        if (newTrack !== currentTrack) {
+          videoRef.current.srcObject = new MediaStream([newTrack]);
+          videoRef.current.play().catch(err => console.error('Erro ao tocar vídeo:', err));
+        }
+      }
     }
   }, [stream]);
 
@@ -140,7 +156,8 @@ const ScreenShareVideo = ({ stream }: { stream?: MediaStream }) => {
         width: '100%',
         maxHeight: '70vh',
         backgroundColor: '#000',
-        borderRadius: 'var(--radius-md)'
+        borderRadius: 'var(--radius-md)',
+        objectFit: 'contain'
       }}
     />
   );
