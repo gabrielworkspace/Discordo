@@ -121,10 +121,6 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       peer.addTrack(track, stream);
     });
 
-    if (stream.getVideoTracks().length === 0) {
-      peer.addTransceiver('video', { direction: 'sendrecv', streams: [stream] });
-    }
-
     peer.ontrack = (event) => {
       remoteStreamsRef.current[targetUserId] = event.streams[0];
       setParticipants(prev => {
@@ -331,13 +327,22 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const replaceVideoTrack = async (newTrack: MediaStreamTrack | null) => {
     for (const peer of Object.values(peersRef.current)) {
-      const videoTransceiver = peer.getTransceivers().find(t => t.receiver.track.kind === 'video');
-      if (videoTransceiver) {
-        try {
-          await videoTransceiver.sender.replaceTrack(newTrack);
-        } catch (err) {
-          console.error('Failed to replace video track', err);
+      const sender = peer.getSenders().find(s => s.track?.kind === 'video');
+      
+      if (sender) {
+        if (newTrack) {
+          try {
+            await sender.replaceTrack(newTrack);
+          } catch (err) {
+            console.error('Error replacing track, falling back to addTrack', err);
+            peer.removeTrack(sender);
+            if (localStream) peer.addTrack(newTrack, localStream);
+          }
+        } else {
+          peer.removeTrack(sender);
         }
+      } else if (newTrack && localStream) {
+        peer.addTrack(newTrack, localStream);
       }
     }
   };
