@@ -18,6 +18,10 @@ interface WebRTCContextType {
   localStream: MediaStream | null;
   isMuted: boolean;
   isSharingScreen: boolean;
+  audioInputId: string;
+  audioOutputId: string;
+  setAudioOutputId: (id: string) => void;
+  changeAudioInput: (deviceId: string) => Promise<void>;
   toggleMute: () => void;
   toggleScreenShare: () => Promise<void>;
   joinRoom: (roomId: string) => void;
@@ -41,6 +45,8 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
+  const [audioInputId, setAudioInputId] = useState<string>('default');
+  const [audioOutputId, setAudioOutputId] = useState<string>('default');
   const [error, setError] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -48,13 +54,51 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const initLocalStream = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const constraints = {
+        audio: audioInputId === 'default' ? true : { deviceId: { exact: audioInputId } },
+        video: false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       setLocalStream(stream);
       return stream;
     } catch (err) {
       console.error('Error accessing microphone', err);
       setError('Permissão de microfone negada ou indisponível.');
       return null;
+    }
+  };
+
+  const changeAudioInput = async (deviceId: string) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } }, video: false });
+      const newTrack = stream.getAudioTracks()[0];
+      
+      if (isMuted) {
+        newTrack.enabled = false;
+      }
+
+      if (localStream) {
+        const oldTrack = localStream.getAudioTracks()[0];
+        if (oldTrack) {
+          localStream.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        localStream.addTrack(newTrack);
+      } else {
+        setLocalStream(stream);
+      }
+
+      Object.values(peersRef.current).forEach(peer => {
+        const sender = peer.getSenders().find(s => s.track?.kind === 'audio');
+        if (sender) {
+          sender.replaceTrack(newTrack);
+        }
+      });
+
+      setAudioInputId(deviceId);
+    } catch (err) {
+      console.error('Error changing audio input', err);
+      setError('Erro ao trocar microfone.');
     }
   };
 
@@ -325,6 +369,10 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       localStream: isSharingScreen && screenStream ? screenStream : localStream,
       isMuted,
       isSharingScreen,
+      audioInputId,
+      audioOutputId,
+      setAudioOutputId,
+      changeAudioInput,
       toggleMute,
       toggleScreenShare,
       joinRoom,

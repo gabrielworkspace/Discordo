@@ -3,16 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { WebRTCContext } from '../contexts/WebRTCContext';
 import { AuthContext } from '../contexts/AuthContext';
 import { supabase } from '../supabase';
-import { Mic, MicOff, MonitorUp, PhoneOff, Users } from 'lucide-react';
+import { Mic, MicOff, MonitorUp, PhoneOff, Users, Settings, X } from 'lucide-react';
 
-const ParticipantAudio = ({ stream }: { stream?: MediaStream }) => {
+const ParticipantAudio = ({ stream, outputId }: { stream?: MediaStream, outputId: string }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   
   useEffect(() => {
-    if (audioRef.current && stream) {
-      audioRef.current.srcObject = stream;
+    if (audioRef.current) {
+      if (stream) audioRef.current.srcObject = stream;
+      
+      const audioEl = audioRef.current as any;
+      if (typeof audioEl.setSinkId === 'function') {
+        audioEl.setSinkId(outputId).catch(console.error);
+      }
     }
-  }, [stream]);
+  }, [stream, outputId]);
 
   return <audio ref={audioRef} autoPlay />;
 };
@@ -56,10 +61,16 @@ export default function Room() {
     isSharingScreen, 
     toggleMute, 
     toggleScreenShare,
-    error
+    error,
+    audioInputId,
+    audioOutputId,
+    changeAudioInput,
+    setAudioOutputId
   } = useContext(WebRTCContext);
 
   const [roomName, setRoomName] = useState('Sala de Call');
+  const [showSettings, setShowSettings] = useState(false);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
 
   useEffect(() => {
     if (id) {
@@ -76,6 +87,12 @@ export default function Room() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (showSettings) {
+      navigator.mediaDevices.enumerateDevices().then(setDevices).catch(console.error);
+    }
+  }, [showSettings]);
+
   const handleLeave = () => {
     leaveRoom();
     navigate('/');
@@ -83,6 +100,9 @@ export default function Room() {
 
   const sharedScreenParticipant = participants.find(p => p.isSharingScreen && p.stream?.getVideoTracks().length);
   const showLocalScreenShare = isSharingScreen && localStream?.getVideoTracks().length;
+
+  const audioInputs = devices.filter(d => d.kind === 'audioinput');
+  const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-base)' }}>
@@ -92,9 +112,14 @@ export default function Room() {
           <h2 style={{ margin: 0, fontSize: '1.25rem' }}>{roomName}</h2>
           <span style={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>Código: {id}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}>
-          <Users size={18} />
-          <span>{participants.length + 1} participantes</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', color: 'var(--color-text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Users size={18} />
+            <span>{participants.length + 1} participantes</span>
+          </div>
+          <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
+            <Settings size={20} />
+          </button>
         </div>
       </header>
 
@@ -147,7 +172,7 @@ export default function Room() {
                   <span>{p.displayName}</span>
                 </div>
                 {p.isMuted ? <MicOff size={16} color="var(--color-danger)" /> : <Mic size={16} color="var(--color-primary)" />}
-                <ParticipantAudio stream={p.stream} />
+                <ParticipantAudio stream={p.stream} outputId={audioOutputId} />
               </div>
             ))}
 
@@ -202,6 +227,50 @@ export default function Room() {
           <PhoneOff size={24} />
         </button>
       </footer>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ width: '400px', position: 'relative' }}>
+            <button 
+              onClick={() => setShowSettings(false)}
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
+            >
+              <X size={20} />
+            </button>
+            <h2 style={{ marginBottom: '24px' }}>Configurações de Áudio</h2>
+            
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label>Microfone (Entrada)</label>
+              <select 
+                value={audioInputId} 
+                onChange={(e) => changeAudioInput(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--color-bg-base)', color: 'white', border: '1px solid var(--color-bg-elevated)' }}
+              >
+                {audioInputs.length === 0 && <option value="default">Padrão</option>}
+                {audioInputs.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Microfone ${d.deviceId.slice(0,5)}`}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Alto-falante (Saída)</label>
+              <select 
+                value={audioOutputId} 
+                onChange={(e) => setAudioOutputId(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--color-bg-base)', color: 'white', border: '1px solid var(--color-bg-elevated)' }}
+              >
+                {audioOutputs.length === 0 && <option value="default">Padrão</option>}
+                {audioOutputs.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Saída ${d.deviceId.slice(0,5)}`}</option>
+                ))}
+              </select>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
