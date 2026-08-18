@@ -51,6 +51,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const peersRef = useRef<{ [userId: string]: RTCPeerConnection }>({});
+  const remoteStreamsRef = useRef<{ [userId: string]: MediaStream }>({});
 
   const initLocalStream = async () => {
     try {
@@ -110,12 +111,20 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     });
 
     peer.ontrack = (event) => {
-      setParticipants(prev => prev.map(p => {
-        if (p.userId === targetUserId) {
-          return { ...p, stream: event.streams[0] };
+      remoteStreamsRef.current[targetUserId] = event.streams[0];
+      setParticipants(prev => {
+        const exists = prev.some(p => p.userId === targetUserId);
+        if (exists) {
+          return prev.map(p => {
+            if (p.userId === targetUserId) {
+              return { ...p, stream: event.streams[0] };
+            }
+            return p;
+          });
         }
-        return p;
-      }));
+        // If not in state yet, presence sync will pick it up from remoteStreamsRef later
+        return prev;
+      });
     };
 
     peer.onicecandidate = (event) => {
@@ -130,6 +139,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
     peer.onnegotiationneeded = async () => {
       try {
+        if (peer.signalingState !== 'stable') return;
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
         if (channelRef.current && user) {
@@ -170,21 +180,23 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
         for (const [key, presences] of Object.entries(state)) {
           if (key === user.id) continue; // Skip self
           const presence: any = presences[0];
+          
           users.push({
             socketId: key,
             userId: key,
             displayName: presence.displayName,
             isMuted: presence.isMuted || false,
             isSharingScreen: presence.isSharingScreen || false,
-            stream: participants.find(p => p.userId === key)?.stream
+            stream: remoteStreamsRef.current[key] || participants.find(p => p.userId === key)?.stream
           });
         }
         
         setParticipants(prev => {
-          // keep streams from prev
           return users.map(u => {
+            // Priority to existing streams, but remoteStreamsRef handles race conditions
             const existing = prev.find(p => p.userId === u.userId);
-            return existing ? { ...u, stream: existing.stream } : u;
+            const streamToUse = u.stream || existing?.stream;
+            return { ...u, stream: streamToUse };
           });
         });
       })
