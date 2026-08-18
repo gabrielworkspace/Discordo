@@ -5,6 +5,99 @@ import { AuthContext } from '../contexts/AuthContext';
 import { supabase } from '../supabase';
 import { Mic, MicOff, MonitorUp, PhoneOff, Users, Settings, X } from 'lucide-react';
 
+let sharedAudioContext: AudioContext | null = null;
+const getAudioContext = () => {
+  if (!sharedAudioContext || sharedAudioContext.state === 'closed') {
+    sharedAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  return sharedAudioContext;
+};
+
+const useAudioVolume = (stream: MediaStream | null | undefined) => {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  useEffect(() => {
+    if (!stream || stream.getAudioTracks().length === 0) {
+      setIsSpeaking(false);
+      return;
+    }
+
+    const audioContext = getAudioContext();
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.minDecibels = -70;
+
+    let source: MediaStreamAudioSourceNode | null = null;
+    try {
+      source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+    } catch (err) {
+      console.warn("Could not create stream source for volume detection", err);
+      return;
+    }
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let animationFrameId: number;
+
+    const updateVolume = () => {
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / dataArray.length;
+      
+      setIsSpeaking(average > 10);
+      
+      animationFrameId = requestAnimationFrame(updateVolume);
+    };
+
+    updateVolume();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      if (source) source.disconnect();
+    };
+  }, [stream]);
+
+  return isSpeaking;
+};
+
+const ParticipantItem = ({ 
+  displayName, 
+  isMuted, 
+  stream, 
+  isLocal 
+}: { 
+  displayName: string, 
+  isMuted: boolean, 
+  stream?: MediaStream | null, 
+  isLocal?: boolean 
+}) => {
+  const isSpeaking = useAudioVolume(isMuted ? null : stream);
+  
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ 
+          width: '32px', height: '32px', borderRadius: '50%', 
+          backgroundColor: isLocal ? 'var(--color-primary)' : '#4a5568', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', 
+          color: isLocal ? 'var(--color-bg-base)' : 'white', fontWeight: 'bold',
+          boxShadow: isSpeaking && !isMuted ? '0 0 0 3px #4ade80' : 'none',
+          transition: 'box-shadow 0.1s'
+        }}>
+          {displayName.charAt(0).toUpperCase()}
+        </div>
+        <span style={{ fontWeight: isSpeaking && !isMuted ? 'bold' : 'normal', transition: 'font-weight 0.1s' }}>
+          {displayName} {isLocal ? '(Você)' : ''}
+        </span>
+      </div>
+      {isMuted ? <MicOff size={16} color="var(--color-danger)" /> : <Mic size={16} color="var(--color-primary)" />}
+    </div>
+  );
+};
+
 const ParticipantAudio = ({ stream, outputId }: { stream?: MediaStream, outputId: string }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   
@@ -154,26 +247,21 @@ export default function Room() {
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             
             {/* Local User */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-bg-base)', fontWeight: 'bold' }}>
-                  {user?.displayName.charAt(0).toUpperCase()}
-                </div>
-                <span>{user?.displayName} (Você)</span>
-              </div>
-              {isMuted ? <MicOff size={16} color="var(--color-danger)" /> : <Mic size={16} color="var(--color-primary)" />}
-            </div>
+            <ParticipantItem 
+              displayName={user?.displayName || 'Usuário'} 
+              isMuted={isMuted} 
+              stream={localStream} 
+              isLocal 
+            />
 
             {/* Remote Users */}
             {participants.map(p => (
-              <div key={p.socketId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#4a5568', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
-                    {p.displayName.charAt(0).toUpperCase()}
-                  </div>
-                  <span>{p.displayName}</span>
-                </div>
-                {p.isMuted ? <MicOff size={16} color="var(--color-danger)" /> : <Mic size={16} color="var(--color-primary)" />}
+              <div key={p.socketId}>
+                <ParticipantItem 
+                  displayName={p.displayName} 
+                  isMuted={p.isMuted} 
+                  stream={p.stream} 
+                />
                 <ParticipantAudio stream={p.stream} outputId={audioOutputId} />
               </div>
             ))}
