@@ -5,7 +5,8 @@ export async function createLiveKitToken(roomName: string, participantName: stri
   const apiSecret = import.meta.env.VITE_LIVEKIT_API_SECRET;
   
   if (!apiKey || !apiSecret) {
-    throw new Error('LiveKit credentials missing in environment variables');
+    console.error('Status das chaves -> API_KEY:', !!apiKey, '| API_SECRET:', !!apiSecret);
+    throw new Error(`Credenciais do LiveKit ausentes nas variáveis de ambiente. Verifique o console.`);
   }
 
   const secret = new TextEncoder().encode(apiSecret);
