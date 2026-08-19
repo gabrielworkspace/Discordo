@@ -5,7 +5,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
 import Room from './pages/Room';
-import { WebRTCProvider } from './contexts/WebRTCContext';
+import { LiveKitProvider } from './contexts/LiveKitContext';
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useContext(AuthContext);
@@ -28,9 +28,9 @@ const AppRoutes = () => {
       } />
       <Route path="/room/:id" element={
         <PrivateRoute>
-          <WebRTCProvider>
+          <LiveKitProvider>
             <Room />
-          </WebRTCProvider>
+          </LiveKitProvider>
         </PrivateRoute>
       } />
     </Routes>
