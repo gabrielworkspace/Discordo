@@ -3,8 +3,66 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { LiveKitContext } from '../contexts/LiveKitContext';
 import type { LiveKitParticipant } from '../contexts/LiveKitContext';
 import { supabase } from '../supabase';
-import { Mic, MicOff, PhoneOff, Users, Settings, X, Loader2 } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Users, Settings, X, Loader2, MonitorUp } from 'lucide-react';
 import { ParticipantEvent, Track } from 'livekit-client';
+
+const ParticipantVideo = ({ participant }: { participant: any }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    const el = videoRef.current;
+
+    const attachTracks = () => {
+      participant.getTrackPublications?.().forEach((pub: any) => {
+        if (pub.isSubscribed && pub.track && pub.track.kind === Track.Kind.Video) {
+          pub.track.attach(el);
+        }
+      });
+    };
+
+    attachTracks();
+
+    const handleTrackSubscribed = (track: Track) => {
+      if (track.kind === Track.Kind.Video) {
+        track.attach(el);
+      }
+    };
+
+    const handleTrackUnsubscribed = (track: Track) => {
+      if (track.kind === Track.Kind.Video) {
+        track.detach(el);
+      }
+    };
+
+    const handleLocalTrackPublished = (pub: any) => {
+      if (pub.track && pub.track.kind === Track.Kind.Video) {
+         pub.track.attach(el);
+      }
+    };
+
+    const handleLocalTrackUnpublished = (pub: any) => {
+      if (pub.track && pub.track.kind === Track.Kind.Video) {
+         pub.track.detach(el);
+      }
+    };
+
+    participant.on(ParticipantEvent.TrackSubscribed, handleTrackSubscribed);
+    participant.on(ParticipantEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+    participant.on(ParticipantEvent.LocalTrackPublished, handleLocalTrackPublished);
+    participant.on(ParticipantEvent.LocalTrackUnpublished, handleLocalTrackUnpublished);
+
+    return () => {
+      participant.off(ParticipantEvent.TrackSubscribed, handleTrackSubscribed);
+      participant.off(ParticipantEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+      participant.off(ParticipantEvent.LocalTrackPublished, handleLocalTrackPublished);
+      participant.off(ParticipantEvent.LocalTrackUnpublished, handleLocalTrackUnpublished);
+    };
+  }, [participant]);
+
+  return <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 'var(--radius-md)', backgroundColor: '#000' }} />;
+};
 
 const ParticipantAudio = ({ participant, outputId }: { participant: any, outputId: string }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -70,27 +128,34 @@ const ParticipantCard = ({ p }: { p: LiveKitParticipant }) => {
       transition: 'all 0.2s ease',
       minHeight: '200px'
     }}>
-      <div style={{
-        width: '80px',
-        height: '80px',
-        borderRadius: '50%',
-        backgroundColor: p.isLocal ? 'var(--color-primary)' : '#4a5568',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '2rem',
-        fontWeight: 'bold',
-        color: p.isLocal ? 'var(--color-bg-base)' : 'white',
-        marginBottom: '16px'
-      }}>
-        {p.name.charAt(0).toUpperCase()}
-      </div>
+      {p.isScreenSharing ? (
+        <div style={{ flex: 1, width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden', marginBottom: '16px', borderRadius: 'var(--radius-md)' }}>
+          <ParticipantVideo participant={p.participant} />
+        </div>
+      ) : (
+        <div style={{
+          width: '80px',
+          height: '80px',
+          borderRadius: '50%',
+          backgroundColor: p.isLocal ? 'var(--color-primary)' : '#4a5568',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '2rem',
+          fontWeight: 'bold',
+          color: p.isLocal ? 'var(--color-bg-base)' : 'white',
+          marginBottom: '16px'
+        }}>
+          {p.name.charAt(0).toUpperCase()}
+        </div>
+      )}
       
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span style={{ fontWeight: '600', fontSize: '1.1rem' }}>
           {p.name} {p.isLocal ? '(Você)' : ''}
         </span>
         {p.isMuted && <MicOff size={16} color="var(--color-danger)" />}
+        {p.isScreenSharing && <MonitorUp size={16} color="var(--color-primary)" />}
       </div>
       
       {!p.isLocal && <ParticipantAudio participant={p.participant} outputId="default" />}
@@ -109,7 +174,9 @@ export default function Room() {
     messages,
     sendMessage,
     isMuted, 
+    isScreenSharing,
     toggleMute, 
+    toggleScreenShare,
     error,
     connectionState,
     audioInputId,
@@ -266,6 +333,26 @@ export default function Room() {
           title={isMuted ? "Desmutar" : "Mutar"}
         >
           {isMuted ? <MicOff size={28} /> : <Mic size={28} />}
+        </button>
+
+        <button 
+          onClick={toggleScreenShare} 
+          style={{ 
+            backgroundColor: isScreenSharing ? 'var(--color-primary)' : 'var(--color-bg-elevated)',
+            color: 'white',
+            borderRadius: '50%',
+            width: '64px',
+            height: '64px',
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: 'var(--shadow-md)',
+            transition: 'background-color 0.2s'
+          }}
+          title={isScreenSharing ? "Parar Transmissão" : "Transmitir Tela"}
+        >
+          <MonitorUp size={28} />
         </button>
 
         <button 

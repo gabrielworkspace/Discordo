@@ -17,6 +17,7 @@ export interface LiveKitParticipant {
   isMuted: boolean;
   isSpeaking: boolean;
   isLocal: boolean;
+  isScreenSharing: boolean;
   participant: Participant;
 }
 
@@ -26,11 +27,13 @@ interface LiveKitContextType {
   messages: ChatMessage[];
   sendMessage: (text: string) => Promise<void>;
   isMuted: boolean;
+  isScreenSharing: boolean;
   audioInputId: string;
   audioOutputId: string;
   setAudioOutputId: (id: string) => void;
   changeAudioInput: (deviceId: string) => Promise<void>;
   toggleMute: () => Promise<void>;
+  toggleScreenShare: () => Promise<void>;
   joinRoom: (roomId: string) => Promise<void>;
   leaveRoom: () => void;
   error: string | null;
@@ -46,6 +49,7 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
   const [participants, setParticipants] = useState<LiveKitParticipant[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isMuted, setIsMuted] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [audioInputId, setAudioInputId] = useState<string>('default');
   const [audioOutputId, setAudioOutputId] = useState<string>('default');
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +68,7 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
       isMuted: !currentRoom.localParticipant.isMicrophoneEnabled,
       isSpeaking: currentRoom.localParticipant.isSpeaking,
       isLocal: true,
+      isScreenSharing: currentRoom.localParticipant.isScreenShareEnabled,
       participant: currentRoom.localParticipant
     });
 
@@ -75,6 +80,7 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
         isMuted: !p.isMicrophoneEnabled,
         isSpeaking: p.isSpeaking,
         isLocal: false,
+        isScreenSharing: p.isScreenShareEnabled,
         participant: p
       });
     });
@@ -113,6 +119,8 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
         .on(RoomEvent.TrackUnmuted, () => updateParticipants(newRoom))
         .on(RoomEvent.LocalTrackPublished, () => updateParticipants(newRoom))
         .on(RoomEvent.LocalTrackUnpublished, () => updateParticipants(newRoom))
+        .on(RoomEvent.TrackSubscribed, () => updateParticipants(newRoom))
+        .on(RoomEvent.TrackUnsubscribed, () => updateParticipants(newRoom))
         .on(RoomEvent.DataReceived, (payload) => {
           const decoder = new TextDecoder();
           const strData = decoder.decode(payload);
@@ -154,6 +162,7 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
     setParticipants([]);
     setMessages([]);
     setIsMuted(true);
+    setIsScreenSharing(false);
   };
 
   const toggleMute = async () => {
@@ -162,6 +171,20 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
     await roomRef.current.localParticipant.setMicrophoneEnabled(!currentMuteStatus);
     setIsMuted(currentMuteStatus);
     updateParticipants(roomRef.current);
+  };
+
+  const toggleScreenShare = async () => {
+    if (!roomRef.current) return;
+    try {
+      const currentShareStatus = !isScreenSharing;
+      await roomRef.current.localParticipant.setScreenShareEnabled(currentShareStatus, { audio: true });
+      setIsScreenSharing(currentShareStatus);
+      updateParticipants(roomRef.current);
+    } catch (err) {
+      console.error('Error toggling screen share', err);
+      setIsScreenSharing(roomRef.current.localParticipant.isScreenShareEnabled);
+      updateParticipants(roomRef.current);
+    }
   };
 
   const changeAudioInput = async (deviceId: string) => {
@@ -220,11 +243,13 @@ export const LiveKitProvider = ({ children }: { children: ReactNode }) => {
       messages,
       sendMessage,
       isMuted,
+      isScreenSharing,
       audioInputId,
       audioOutputId,
       setAudioOutputId: setAudioOutput,
       changeAudioInput,
       toggleMute,
+      toggleScreenShare,
       joinRoom,
       leaveRoom,
       error,
